@@ -4,6 +4,9 @@ import torch
 import torch.distributions as D
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_ema import ExponentialMovingAverage # Blast update for modification #3
+from pudb.remote import set_trace
+import copy
 
 from ..tools import *
 from .a2c import *
@@ -240,10 +243,16 @@ class WorldModel(nn.Module):
         self.kl_weight = conf.kl_weight
         self.kl_balance = None if conf.kl_balance == 0.5 else conf.kl_balance
         self.aux_critic_weight = conf.aux_critic_weight
+        self.target_ema = conf.target_ema # Blast update for modification #3
+        self.use_target_encoder = conf.use_target_encoder
+        self.BLAST_recon = conf.BLAST_recon
 
         # Encoder
 
         self.encoder = MultiEncoder(conf)
+        if self.use_target_encoder:
+            self.target_encoder = copy.deepcopy(self.encoder)
+            # self.target_encoder.load_state_dict(self.encoder.state_dict())
 
         # Decoders
 
@@ -260,7 +269,8 @@ class WorldModel(nn.Module):
                              hidden_dim=conf.hidden_dim,
                              gru_layers=conf.gru_layers,
                              gru_type=conf.gru_type,
-                             layer_norm=conf.layer_norm)
+                             layer_norm=conf.layer_norm,
+                             ar_steps=conf.ar_steps)
 
         # Auxiliary critic
 
@@ -286,6 +296,10 @@ class WorldModel(nn.Module):
     def init_state(self, batch_size: int) -> Tuple[Any, Any]:
         return self.core.init_state(batch_size)
 
+    # def update_target_network(self):
+    #     # update target network with an exponential moving average of the online network
+    #     self.target_network.load_state_dict(self.Q_network.state_dict())
+    
     def forward(self,
                 obs: Dict[str, Tensor],
                 in_state: Any
@@ -305,6 +319,9 @@ class WorldModel(nn.Module):
         # Encoder
 
         embed = self.encoder(obs)
+        if self.use_target_encoder:
+            with torch.no_grad():
+                target_embed = self.target_encoder(obs) # Blast update for modification #3
 
         # RSSM
 
@@ -316,6 +333,17 @@ class WorldModel(nn.Module):
                               iwae_samples=iwae_samples,
                               do_open_loop=do_open_loop)
 
+        # RSSM
+
+        if self.use_target_encoder:
+            _, target_post, *_ = \
+                self.core.forward(target_embed,
+                                obs['action'],
+                                obs['reset'],
+                                in_state,
+                                iwae_samples=iwae_samples,
+                                do_open_loop=do_open_loop)
+
         if forward_only:
             return torch.tensor(0.0), features, states, out_state, {}, {}
 
@@ -324,18 +352,24 @@ class WorldModel(nn.Module):
         loss_reconstr, metrics, tensors = self.decoder.training_step(features, obs)
 
         # KL loss
-
+        # set_trace()
         d = self.core.zdistr
         dprior = d(prior)
+
+        if self.use_target_encoder:
+            with torch.no_grad():
+                target_dpost = d(target_post)
+        
         dpost = d(post)
-        loss_kl_exact = D.kl.kl_divergence(dpost, dprior)  # (T,B,I)
+        
+        loss_kl_exact = D.kl.kl_divergence(target_dpost, dprior) if self.use_target_encoder else D.kl.kl_divergence(dpost, dprior)  # (T,B,I)
         if iwae_samples == 1:
             # Analytic KL loss, standard for VAE
             if not self.kl_balance:
                 loss_kl = loss_kl_exact
             else:
-                loss_kl_postgrad = D.kl.kl_divergence(dpost, d(prior.detach()))
-                loss_kl_priograd = D.kl.kl_divergence(d(post.detach()), dprior)
+                loss_kl_postgrad = D.kl.kl_divergence(target_dpost, d(prior.detach())) if self.use_target_encoder else D.kl.kl_divergence(dpost, d(prior.detach()))
+                loss_kl_priograd = D.kl.kl_divergence(d(target_post.detach()), dprior) if self.use_target_encoder else D.kl.kl_divergence(d(post.detach()), dprior)
                 loss_kl = (1 - self.kl_balance) * loss_kl_postgrad + self.kl_balance * loss_kl_priograd
         else:
             # Sampled KL loss, for IWAE
@@ -360,7 +394,7 @@ class WorldModel(nn.Module):
         # Total loss
 
         assert loss_kl.shape == loss_reconstr.shape
-        loss_model_tbi = self.kl_weight * loss_kl + loss_reconstr
+        loss_model_tbi = self.kl_weight * loss_kl + self.BLAST_recon*loss_reconstr
         loss_model = -logavgexp(-loss_model_tbi, dim=2)
         loss = loss_model.mean() + self.aux_critic_weight * loss_critic_aux
 

@@ -19,7 +19,7 @@ class MultiEncoder(nn.Module):
 
         if conf.image_encoder == 'cnn':
             self.encoder_image = ConvEncoder(in_channels=encoder_channels,
-                                             cnn_depth=conf.cnn_depth)
+                                             cnn_depth=conf.cnn_depth, encoder_norm=conf.encoder_norm)
         elif conf.image_encoder == 'dense':
             self.encoder_image = DenseEncoder(in_dim=conf.image_size * conf.image_size * encoder_channels,
                                               out_dim=256,
@@ -71,23 +71,42 @@ class MultiEncoder(nn.Module):
 
 class ConvEncoder(nn.Module):
 
-    def __init__(self, in_channels=3, cnn_depth=32, activation=nn.ELU):
+    def __init__(self, in_channels=3, cnn_depth=32, activation=nn.ELU, encoder_norm=False):
         super().__init__()
         self.out_dim = cnn_depth * 32
+        self.encoder_norm = encoder_norm
         kernels = (4, 4, 4, 4)
         stride = 2
         d = cnn_depth
-        self.model = nn.Sequential(
-            nn.Conv2d(in_channels, d, kernels[0], stride),
-            activation(),
-            nn.Conv2d(d, d * 2, kernels[1], stride),
-            activation(),
-            nn.Conv2d(d * 2, d * 4, kernels[2], stride),
-            activation(),
-            nn.Conv2d(d * 4, d * 8, kernels[3], stride),
-            activation(),
-            nn.Flatten()
-        )
+
+        if self.encoder_norm:
+            self.model = nn.Sequential(
+                nn.Conv2d(in_channels, d, kernels[0], stride),
+                nn.BatchNorm2d(d),
+                activation(),
+                nn.Conv2d(d, d * 2, kernels[1], stride),
+                nn.BatchNorm2d(d * 2),
+                activation(),
+                nn.Conv2d(d * 2, d * 4, kernels[2], stride),
+                nn.BatchNorm2d(d * 4),
+                activation(),
+                nn.Conv2d(d * 4, d * 8, kernels[3], stride),
+                nn.BatchNorm2d(d * 8),
+                activation(),
+                nn.Flatten()
+            )
+        else:
+            self.model = nn.Sequential(
+                nn.Conv2d(in_channels, d, kernels[0], stride),
+                activation(),
+                nn.Conv2d(d, d * 2, kernels[1], stride),
+                activation(),
+                nn.Conv2d(d * 2, d * 4, kernels[2], stride),
+                activation(),
+                nn.Conv2d(d * 4, d * 8, kernels[3], stride),
+                activation(),
+                nn.Flatten()
+            )
 
     def forward(self, x):
         x, bd = flatten_batch(x, 3)

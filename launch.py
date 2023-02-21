@@ -5,6 +5,7 @@ import time
 from logging import info
 from distutils.util import strtobool
 from multiprocessing import Process
+from pudb.remote import set_trace
 from typing import List
 
 import generator
@@ -20,7 +21,7 @@ def launch():
     args, remaining = parser.parse_known_args()
 
     # Config from YAML
-
+    # set_trace(term_size=(102, 27))
     conf = {}
     configs = read_yamls('./config')
     for name in args.configs:
@@ -172,8 +173,8 @@ def check_subprocesses(subprocesses):
             if p.exitcode == 0:
                 subp_finished.append(p)
                 info(f'Generator process {p.pid} finished')
-            else:
-                raise Exception(f'Generator process {p.pid} died with exitcode {p.exitcode}')
+            # else:
+            #     raise Exception(f'Generator process {p.pid} died with exitcode {p.exitcode}')
     for p in subp_finished:
         subprocesses.remove(p)
 

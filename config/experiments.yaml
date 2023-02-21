@@ -41,4 +41,32 @@ dmc_manipulator_bring_peg:
 dmlab_rooms_select_nonmatching_object:
   env_id: DmLab-rooms_select_nonmatching_object
 
+# -------------------------
+# BLAST Ablation
+# -------------------------
 
+BLAST_full:
+  BLAST_recon: 0 # either zero or one (0 means no reconstruction loss)
+  kl_balance: 1
+  use_target_encoder: True
+  target_ema: 0.99
+  layer_norm: True
+  encoder_norm: True 
+  ar_steps: 4 # number of autoregressive loops in the prior
+
+BLAST_recon:
+  BLAST_recon: 0 # either zero or one (0 means no reconstruction loss)
+
+BLAST_SG:
+  kl_balance: 1
+
+BLAST_full:
+  use_target_encoder: True
+  target_ema: 0.99
+
+BLAST_full_BN:
+  layer_norm: True
+  encoder_norm: True 
+
+BLAST_AR:
+  ar_steps: 4 # number of autoregressive loops in the prior

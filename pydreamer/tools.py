@@ -9,6 +9,8 @@ import warnings
 from logging import debug, info, exception
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
+import torch
+# from mlflow.artifacts import download_artifacts
 
 import numpy as np
 import yaml
@@ -23,6 +25,11 @@ warnings.filterwarnings("ignore", "Your application has authenticated using end 
 
 print_once_keys = set()
 
+def ema(m, m_target, tau):
+	"""Update slow-moving average of online network (target network) at rate tau."""
+	with torch.no_grad():
+		for p, p_target in zip(m.parameters(), m_target.parameters()):
+			p_target.data.lerp_(p.data, tau)
 
 def print_once(key, obj):
     if key not in print_once_keys:
@@ -181,6 +188,8 @@ def mlflow_load_checkpoint(model, optimizers=tuple(), artifact_path='checkpoints
     with tempfile.TemporaryDirectory() as tmpdir:
         client = MlflowClient()
         run_id = mlflow.active_run().info.run_id  # type: ignore
+        # from pudb.remote import set_trace
+        # set_trace(term_size=(102, 27))
         try:
             path = client.download_artifacts(run_id, artifact_path, tmpdir)
         except Exception as e:  # TODO: check if it's an error instead of expected "not found"

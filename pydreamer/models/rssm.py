@@ -6,6 +6,7 @@ import torch.distributions as D
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from pudb.remote import set_trace
 
 from . import rnn
 from .functions import *
@@ -14,9 +15,9 @@ from .common import *
 
 class RSSMCore(nn.Module):
 
-    def __init__(self, embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm):
+    def __init__(self, embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm, ar_steps):
         super().__init__()
-        self.cell = RSSMCell(embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm)
+        self.cell = RSSMCell(embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm, ar_steps)
 
     def forward(self,
                 embed: Tensor,       # tensor(T, B, E)
@@ -93,8 +94,9 @@ class RSSMCore(nn.Module):
 
 class RSSMCell(nn.Module):
 
-    def __init__(self, embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm):
+    def __init__(self, embed_dim, action_dim, deter_dim, stoch_dim, stoch_discrete, hidden_dim, gru_layers, gru_type, layer_norm, ar_steps):
         super().__init__()
+        self.ar_steps = ar_steps
         self.stoch_dim = stoch_dim
         self.stoch_discrete = stoch_discrete
         self.deter_dim = deter_dim
@@ -109,6 +111,11 @@ class RSSMCell(nn.Module):
         self.prior_mlp_h = nn.Linear(deter_dim, hidden_dim)
         self.prior_norm = norm(hidden_dim, eps=1e-3)
         self.prior_mlp = nn.Linear(hidden_dim, stoch_dim * (stoch_discrete or 2))
+        if self.ar_steps > 0:
+            self.prior_ar_z2h = nn.Linear(stoch_dim * (stoch_discrete or 2), deter_dim)
+            self.prior_ar_h2h = nn.Linear(deter_dim, deter_dim)
+            self.tanh = nn.Tanh()
+            # self.prior_ar = nn.RNN(stoch_dim * (stoch_discrete or 2), deter_dim, batch_first=True)
 
         self.post_mlp_h = nn.Linear(deter_dim, hidden_dim)
         self.post_mlp_e = nn.Linear(embed_dim, hidden_dim, bias=False)
@@ -175,6 +182,15 @@ class RSSMCell(nn.Module):
         x = self.prior_norm(x)
         x = F.elu(x)
         prior = self.prior_mlp(x)          # (B,2S)
+        if self.ar_steps > 0:
+            for _ in range(self.ar_steps): # this for loop resembles an RNN module that takes the previous sequence's output and an input to the next sequence
+                x = self.prior_ar_z2h(prior)
+                h = self.prior_ar_h2h(h)
+                h = self.tanh(x + h)
+                x = self.prior_mlp_h(h)
+                x = self.prior_norm(x)
+                x = F.elu(x)
+                prior = self.prior_mlp(x)
         prior_distr = self.zdistr(prior)
         sample = prior_distr.rsample().reshape(B, -1)
 
@@ -186,10 +202,20 @@ class RSSMCell(nn.Module):
     def batch_prior(self,
                     h: Tensor,     # tensor(T, B, D)
                     ) -> Tensor:
+        # set_trace(term_size=(201, 29))
         x = self.prior_mlp_h(h)
         x = self.prior_norm(x)
         x = F.elu(x)
         prior = self.prior_mlp(x)  # tensor(B,2S)
+        if self.ar_steps > 0:
+            for _ in range(self.ar_steps): # this for loop resembles an RNN module that takes the previous sequence's output and an input to the next sequence
+                x = self.prior_ar_z2h(prior)
+                h = self.prior_ar_h2h(h)
+                h = self.tanh(x + h)
+                x = self.prior_mlp_h(h)
+                x = self.prior_norm(x)
+                x = F.elu(x)
+                prior = self.prior_mlp(x)
         return prior
 
     def zdistr(self, pp: Tensor) -> D.Distribution:

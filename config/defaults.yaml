@@ -119,6 +119,15 @@ defaults:
   env_time_limit: 0
   env_no_terminal: False
 
+  # BLAST parameters (default values in here are for a normal DV2 model)
+  BLAST_recon: 1 # either zero or one (0 means no reconstruction loss)
+  # kl_balance: 1
+  use_target_encoder: False
+  target_ema: 0.99          # expoentnial moving average parameter
+  encoder_norm: False        # using batch normalization in encoder
+  # layer_norm: True          # normalization in other modules
+  ar_steps: 0               # number of autoregressive loops in the prior
+
 minigrid:
   env_id: MiniGrid-MazeS11N-v0
   # Features

@@ -3,6 +3,7 @@ from collections import defaultdict
 from datetime import datetime
 from logging import critical, debug, error, info, warning
 from typing import Iterator, Optional
+from pudb.remote import set_trace
 
 import mlflow
 import numpy as np
@@ -197,6 +198,10 @@ def run(conf):
                         scaler.step(opt)
                     scaler.update()
 
+                    if conf.use_target_encoder: # update target encoder
+                        tools.ema(model.wm.encoder, model.wm.target_encoder, conf.target_ema)
+
+
                 with timer('other'):
 
                     # Metrics
@@ -246,6 +251,7 @@ def run(conf):
                         last_time, last_steps = t, steps
 
                         info(f"[{steps:06}]"
+                             f"[{(100*data_train_stats.stats_steps * conf.env_action_repeat)//conf.n_env_steps:03}%]"
                              f"  loss_model: {metrics.get('train/loss_model', 0):.3f}"
                              f"  loss_critic: {metrics.get('train/loss_critic', 0):.3f}"
                              f"  policy_value: {metrics.get('train/policy_value',0):.3f}"
