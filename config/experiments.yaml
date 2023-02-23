@@ -60,7 +60,7 @@ BLAST_recon:
 BLAST_SG:
   kl_balance: 1
 
-BLAST_full:
+BLAST_EMA:
   use_target_encoder: True
   target_ema: 0.99
 
